@@ -3,6 +3,7 @@ import re
 import pandas as pd
 from docxtpl import DocxTemplate
 
+
 # FUNCIONES
 
 def limpiar_texto(valor):
@@ -11,7 +12,9 @@ def limpiar_texto(valor):
     return str(valor).strip()
 
 def normalizar(texto):
-    return limpiar_texto(texto).lower()
+    texto = limpiar_texto(texto).lower()
+    texto = re.sub(r'[^\w\s]', '', texto)
+    return texto
 
 def limpiar_nombre_archivo(valor):
     texto = limpiar_texto(valor)
@@ -20,128 +23,124 @@ def limpiar_nombre_archivo(valor):
     return texto
 
 # LEER EXCEL
-
 df = pd.read_excel("base.xlsx")
+df.columns = df.columns.str.strip().str.lower()
 
 print("\nColumnas detectadas:")
-print(df.columns)
+print(df.columns.tolist())
 
-# DETECTAR PLANTILLAS
-
+# CONFIGURACIÓN
 carpeta_plantillas = "Formatos_Cruce"
-
-plantillas = {}
-
-for archivo in os.listdir(carpeta_plantillas):
-
-    if archivo.endswith(".docx"):
-
-        nombre_limpio = normalizar(archivo.replace(".docx", ""))
-
-        plantillas[nombre_limpio] = archivo
-
-
-print("\nPlantillas detectadas:")
-
-for p in plantillas:
-    print("-", p)
-
-
-# RELACIONA DESCRIPCION PLANTILLA
 
 mapa_descripciones = {
     "taponamiento efectivo": "Taponamiento Efectivo.docx",
     "taponamiento inefectivo": "Taponamiento Inefectivo Deuda.docx",
     "activar factura virtual": "ACTIVAR FACTURA VIRTUAL (1).docx",
     "desactivar factura virtual": "Desactivar factura virtual.docx",
-    "cambio de nombre efectivo" : "cambio de nombre efectivo.docx",
+    "cambio de nombre efectivo": "cambio de nombre efectivo.docx",
     "cambio de nombre inefectivo": "cambio de nombre inefectivo.docx",
-    "independdizacion inefectiva" : "independizacion inefectiva deuda.docx",
-    "independizacon efectiva" : "NUEVA ACOMETIDA EFECTIVA ESPERA.docx",
-    "nueva acometida inefectiva" : "nueva acometida inefectiva documentos.docx",
-    "nueva acometida efectiva" : "NUEVA ACOMETIDA EFECTIVA ESPERA.docx",
+    "independdizacion inefectiva": "independizacion inefectiva deuda.docx",
+    "independizacon efectiva": "NUEVA ACOMETIDA EFECTIVA ESPERA.docx",
+    "nueva acometida inefectiva": "nueva acometida inefectiva documentos.docx",
+    "nueva acometida efectiva": "NUEVA ACOMETIDA EFECTIVA ESPERA.docx",
     "visita": "Informacion visita (1).docx",
-    "normalizacion efectivaa" : "Normalizacion Proximo A Ejecutar.docx",
-    "Paz y salvo efectivo": "Paz y salvo efectivo.docx",
-    "Paz y salvo efectivo": "Paz y salvo.docx",
-    "Paz y salvo inefectivo" : "Paz y salvo inefectivo.docx",
-    "reconexion efectiva" : "reconexion efectiva.docx",
-    "reconexion inefectiva" : "Reconexion inefectiva Deuda.docx",
-    "Revision con geofono efectiva" : "REVISION CON GEOFONO EFECTIVA (1).docx",
-    "Revision con geofono inefectiva" : "REVISION CON GEOFONO INEFECTIVA (1).docx",
-    "suspension efectiva" : "Suspension efectiva.docx",
-    "suspension inefectiva" : "Suspension inefectiva deuda.docx",
-    "vinculacion inefectiva" : "vincu inefectiva sin putos hidraulicos.docx",
+    "normalizacion efectivaa": "Normalizacion Proximo A Ejecutar.docx",
+    "paz y salvo efectivo": "Paz y salvo efectivo.docx",
+    "paz y salvo inefectivo": "Paz y salvo inefectivo.docx",
+    "reconexion efectiva": "reconexion efectiva.docx",
+    "reconexion inefectiva": "Reconexion inefectiva Deuda.docx",
+    "revision con geofono efectiva": "REVISION CON GEOFONO EFECTIVA (1).docx",
+    "revision con geofono inefectiva": "REVISION CON GEOFONO INEFECTIVA (1).docx",
+    "suspension efectiva": "Suspension efectiva.docx",
+    "suspension inefectiva": "Suspension inefectiva deuda.docx",
+    "vinculacion inefectiva": "vincu inefectiva sin putos hidraulicos.docx",
+    "revision interna": "informacion visita (1).docx",
 }
 
-  
-
-# RENOMBRE COLUMNAS
-
 rename_map = {
-    "Cta.contrato": "cta_contrato",
-    "Interl.comercial": "interl_comercial",
+    "cta.contrato": "cta_contrato",
+    "interl.comercial": "interl_comercial",
     "control.tecnico": "control_tecnico",
     "calle.2": "calle_2",
     "cuenta.interna": "cuenta_interna",
     "nombre.radicado": "nombre_radicado",
-    "fecha.de.radicado": "fecha_de_radicado"
+    "fecha.de.radicado": "fecha_de_radicado",
+    "direccion": "direccion",
+    "correo": "correo",
+    "telefono": "telefono",
+    "nombre": "nombre",
+    "apellido": "apellido",
+    "entrada": "entrada",
 }
 
-
 # GENERAR OFICIOS
-
-
 for idx, fila in df.iterrows():
 
-    descripcion = normalizar(fila.get("descripcion", ""))
+    descripcion_raw = limpiar_texto(fila.get("descripcion", ""))
+    descripcion = normalizar(descripcion_raw)
 
-    nombre_plantilla = mapa_descripciones.get(descripcion)
-
-    if not nombre_plantilla:
-
-        print("Fila", idx, "-> no se encontró plantilla para:", descripcion)
-
+    if not descripcion:
+        print(f"Fila {idx}: descripción vacía, se omite.")
         continue
 
+    # BUSCAR PLANTILLA usando el mapa
+    nombre_plantilla = None
+
+    for clave, archivo in mapa_descripciones.items():
+        if normalizar(clave) in descripcion or descripcion in normalizar(clave):
+            nombre_plantilla = archivo
+            break
+
+    if not nombre_plantilla:
+        print(f"Fila {idx}: no se encontró plantilla para '{descripcion_raw}'")
+        continue
 
     ruta_plantilla = os.path.join(carpeta_plantillas, nombre_plantilla)
 
     if not os.path.exists(ruta_plantilla):
-
-        print("Fila", idx, "-> plantilla no encontrada:", nombre_plantilla)
-
+        print(f"Fila {idx}: archivo de plantilla no existe en disco: {nombre_plantilla}")
         continue
 
-
-    # construir contexto
-
+    # CONSTRUIR CONTEXTO
     contexto = {}
 
     for col in df.columns:
-
         llave = rename_map.get(col, col)
+        valor = fila.get(col, "")
 
-        contexto[llave] = limpiar_texto(fila.get(col, ""))
+        if "fecha" in llave:
+            if pd.notna(valor):
+                try:
+                    fecha_str = str(valor)
+                    fecha_limpia = pd.to_datetime(fecha_str).strftime("%d/%m/%Y")
+                    contexto[llave] = fecha_limpia
+                except Exception:
+                    contexto[llave] = str(valor).split(" ")[0].split("T")[0]
+            else:
+                contexto[llave] = ""
+        else:
+            contexto[llave] = limpiar_texto(valor)
 
+    # IMPRIMIR CONTEXTO PARA VERIFICAR FECHAS
+    print(f"\nFila {idx} - contexto de fechas:")
+    for k, v in contexto.items():
+        if "fecha" in k:
+            print(f"  {k}: {v}")
 
-    doc = DocxTemplate(ruta_plantilla)
+    # GENERAR DOCUMENTO
+    try:
+        doc = DocxTemplate(ruta_plantilla)
+        doc.render(contexto)
 
-    doc.render(contexto)
+        nombre_limpio = limpiar_nombre_archivo(contexto.get("nombre", "sin_nombre"))
+        apellido_limpio = limpiar_nombre_archivo(contexto.get("apellido", "sin_apellido"))
 
+        nombre_archivo = f"oficio_{nombre_limpio}_{apellido_limpio}_{idx}.docx"
+        doc.save(nombre_archivo)
 
-    nombre_limpio = limpiar_nombre_archivo(contexto.get("nombre", ""))
+        print(f"✓ Generado: {nombre_archivo}")
 
-    apellido_limpio = limpiar_nombre_archivo(contexto.get("apellido", ""))
+    except Exception as e:
+        print(f"Fila {idx}: error al generar documento — {e}")
 
-
-    nombre_archivo = f"oficio_{nombre_limpio}_{apellido_limpio}_{idx}.docx"
-
-
-    doc.save(nombre_archivo)
-
-
-    print("Generado:", nombre_archivo)
-
-
-print("\nOficios generados correctamente")
+print("\nProceso finalizado.")
