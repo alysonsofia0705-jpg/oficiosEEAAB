@@ -1,10 +1,10 @@
 import os
 import re
+import sys
 import pandas as pd
 from docxtpl import DocxTemplate
+from difflib import get_close_matches
 
-
-# FUNCIONES
 
 def limpiar_texto(valor):
     if pd.isna(valor):
@@ -19,43 +19,51 @@ def normalizar(texto):
 def limpiar_nombre_archivo(valor):
     texto = limpiar_texto(valor)
     texto = re.sub(r'[\\/*?:"<>|]', "", texto)
-    texto = texto.replace("  ", " ").strip()
-    return texto
+    return texto.strip()
 
-# LEER EXCEL
-df = pd.read_excel("base.xlsx")
+def limpiar_xml(valor):
+    if not valor:
+        return ""
+    valor = str(valor)
+    valor = valor.replace("&", "y")
+    valor = valor.replace("<", "")
+    valor = valor.replace(">", "")
+    valor = valor.replace('"', "")
+    valor = valor.replace("'", "")
+    return valor.strip()
+
+def ruta_base():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+base_path = ruta_base()
+
+ruta_excel = os.path.join(base_path, "base.xlsx")
+df = pd.read_excel(ruta_excel)
 df.columns = df.columns.str.strip().str.lower()
 
 print("\nColumnas detectadas:")
 print(df.columns.tolist())
 
-# CONFIGURACIÓN
-carpeta_plantillas = "Formatos_Cruce"
+for col in df.columns:
+    if "fecha" in col or "control" in col:
+        df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime("%d/%m/%Y").fillna("")
 
-mapa_descripciones = {
-    "taponamiento efectivo": "Taponamiento Efectivo.docx",
-    "taponamiento inefectivo": "Taponamiento Inefectivo Deuda.docx",
-    "activar factura virtual": "ACTIVAR FACTURA VIRTUAL (1).docx",
-    "desactivar factura virtual": "Desactivar factura virtual.docx",
-    "cambio de nombre efectivo": "cambio de nombre efectivo.docx",
-    "cambio de nombre inefectivo": "cambio de nombre inefectivo.docx",
-    "independdizacion inefectiva": "independizacion inefectiva deuda.docx",
-    "independizacon efectiva": "NUEVA ACOMETIDA EFECTIVA ESPERA.docx",
-    "nueva acometida inefectiva": "nueva acometida inefectiva documentos.docx",
-    "nueva acometida efectiva": "NUEVA ACOMETIDA EFECTIVA ESPERA.docx",
-    "visita": "Informacion visita (1).docx",
-    "normalizacion efectivaa": "Normalizacion Proximo A Ejecutar.docx",
-    "paz y salvo efectivo": "Paz y salvo efectivo.docx",
-    "paz y salvo inefectivo": "Paz y salvo inefectivo.docx",
-    "reconexion efectiva": "reconexion efectiva.docx",
-    "reconexion inefectiva": "Reconexion inefectiva Deuda.docx",
-    "revision con geofono efectiva": "REVISION CON GEOFONO EFECTIVA (1).docx",
-    "revision con geofono inefectiva": "REVISION CON GEOFONO INEFECTIVA (1).docx",
-    "suspension efectiva": "Suspension efectiva.docx",
-    "suspension inefectiva": "Suspension inefectiva deuda.docx",
-    "vinculacion inefectiva": "vincu inefectiva sin putos hidraulicos.docx",
-    "revision interna": "informacion visita (1).docx",
+carpeta_plantillas = os.path.join(base_path, "Formatos_Cruce")
+
+plantillas = [f for f in os.listdir(carpeta_plantillas) if f.endswith(".docx")]
+
+print("\nPlantillas disponibles:")
+for p in plantillas:
+    print(p)
+
+plantillas_dict = {
+    normalizar(p.replace(".docx", "")): p for p in plantillas
 }
+
+lista_claves = list(plantillas_dict.keys())
 
 rename_map = {
     "cta.contrato": "cta_contrato",
@@ -73,61 +81,80 @@ rename_map = {
     "entrada": "entrada",
 }
 
-# GENERAR OFICIOS
+generados = 0
+sin_plantilla = 0
+
 for idx, fila in df.iterrows():
 
     descripcion_raw = limpiar_texto(fila.get("descripcion", ""))
     descripcion = normalizar(descripcion_raw)
 
+    print(f"\nFila {idx} → descripción: {descripcion}")
+
     if not descripcion:
-        print(f"Fila {idx}: descripción vacía, se omite.")
+        print(f"Fila {idx}: descripción vacía")
+        sin_plantilla += 1
         continue
 
-    # BUSCAR PLANTILLA usando el mapa
     nombre_plantilla = None
 
-    for clave, archivo in mapa_descripciones.items():
-        if normalizar(clave) in descripcion or descripcion in normalizar(clave):
-            nombre_plantilla = archivo
-            break
+    if any(p in descripcion for p in ["vinculacion", "vinculación"]):
+        for clave, archivo in plantillas_dict.items():
+            if "nueva acometida efectiva espera" in clave:
+                nombre_plantilla = archivo
+                break
+
+        if not nombre_plantilla:
+            print("No se encontró la plantilla de vinculación")
+            sin_plantilla += 1
+            continue
+
+    elif "independizacion" in descripcion:
+        for clave, archivo in plantillas_dict.items():
+            if "nueva acometida efectiva espera" in clave:
+                nombre_plantilla = archivo
+                break
+
+    elif "revisiones internas" in descripcion:
+        for clave, archivo in plantillas_dict.items():
+            if "informacion visita" in clave:
+                nombre_plantilla = archivo
+                break
+    
+    elif "revision interna" in descripcion:
+        for clave, archivo in plantillas_dict.items():
+            if "informacion visita" in clave:
+                nombre_plantilla = archivo
+                break
 
     if not nombre_plantilla:
-        print(f"Fila {idx}: no se encontró plantilla para '{descripcion_raw}'")
-        continue
+        coincidencia = get_close_matches(descripcion, lista_claves, n=1, cutoff=0.4)
+
+        if not coincidencia:
+            print(f"Fila {idx}: no se encontró plantilla para '{descripcion_raw}'")
+            sin_plantilla += 1
+            continue
+
+        nombre_plantilla = plantillas_dict[coincidencia[0]]
 
     ruta_plantilla = os.path.join(carpeta_plantillas, nombre_plantilla)
 
     if not os.path.exists(ruta_plantilla):
-        print(f"Fila {idx}: archivo de plantilla no existe en disco: {nombre_plantilla}")
+        print(f"Fila {idx}: plantilla no existe {nombre_plantilla}")
+        sin_plantilla += 1
         continue
 
-    # CONSTRUIR CONTEXTO
     contexto = {}
 
     for col in df.columns:
         llave = rename_map.get(col, col)
         valor = fila.get(col, "")
 
-        if "fecha" in llave:
-            if pd.notna(valor):
-                try:
-                    fecha_str = str(valor)
-                    fecha_limpia = pd.to_datetime(fecha_str).strftime("%d/%m/%Y")
-                    contexto[llave] = fecha_limpia
-                except Exception:
-                    contexto[llave] = str(valor).split(" ")[0].split("T")[0]
-            else:
-                contexto[llave] = ""
-        else:
-            contexto[llave] = limpiar_texto(valor)
+        if isinstance(valor, float) and valor.is_integer():
+            valor = int(valor)
 
-    # IMPRIMIR CONTEXTO PARA VERIFICAR FECHAS
-    print(f"\nFila {idx} - contexto de fechas:")
-    for k, v in contexto.items():
-        if "fecha" in k:
-            print(f"  {k}: {v}")
+        contexto[llave] = limpiar_xml(limpiar_texto(valor))
 
-    # GENERAR DOCUMENTO
     try:
         doc = DocxTemplate(ruta_plantilla)
         doc.render(contexto)
@@ -135,12 +162,19 @@ for idx, fila in df.iterrows():
         nombre_limpio = limpiar_nombre_archivo(contexto.get("nombre", "sin_nombre"))
         apellido_limpio = limpiar_nombre_archivo(contexto.get("apellido", "sin_apellido"))
 
-        nombre_archivo = f"oficio_{nombre_limpio}_{apellido_limpio}_{idx}.docx"
+        nombre_archivo = os.path.join(
+            base_path,
+            f"oficio_{nombre_limpio}_{apellido_limpio}_{idx}.docx"
+        )
+
         doc.save(nombre_archivo)
 
         print(f"✓ Generado: {nombre_archivo}")
+        generados += 1
 
     except Exception as e:
-        print(f"Fila {idx}: error al generar documento — {e}")
+        print(f"Fila {idx}: error — {e}")
 
-print("\nProceso finalizado.")
+print("\nRESUMEN:")
+print(f"Oficios generados: {generados}")
+print(f"Sin plantilla: {sin_plantilla}")
