@@ -5,7 +5,6 @@ import pandas as pd
 from docxtpl import DocxTemplate
 from difflib import get_close_matches
 
-
 def limpiar_texto(valor):
     if pd.isna(valor):
         return ""
@@ -14,7 +13,8 @@ def limpiar_texto(valor):
 def normalizar(texto):
     texto = limpiar_texto(texto).lower()
     texto = re.sub(r'[^\w\s]', '', texto)
-    return texto
+    texto = re.sub(r'\s+', ' ', texto)
+    return texto.strip()
 
 def limpiar_nombre_archivo(valor):
     texto = limpiar_texto(valor)
@@ -37,6 +37,15 @@ def ruta_base():
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
+def contiene(texto, palabra):
+    return palabra in texto.replace(" ", "")
+
+def buscar_plantilla(clave_busqueda, plantillas_dict):
+    clave_normalizada = normalizar(clave_busqueda)
+    for clave, archivo in plantillas_dict.items():
+        if clave_normalizada in clave or clave in clave_normalizada:
+            return archivo
+    return None
 
 base_path = ruta_base()
 
@@ -44,20 +53,8 @@ ruta_excel = os.path.join(base_path, "base.xlsx")
 df = pd.read_excel(ruta_excel)
 df.columns = df.columns.str.strip().str.lower()
 
-print("\nColumnas detectadas:")
-print(df.columns.tolist())
-
-for col in df.columns:
-    if "fecha" in col or "control" in col:
-        df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime("%d/%m/%Y").fillna("")
-
 carpeta_plantillas = os.path.join(base_path, "Formatos_Cruce")
-
 plantillas = [f for f in os.listdir(carpeta_plantillas) if f.endswith(".docx")]
-
-print("\nPlantillas disponibles:")
-for p in plantillas:
-    print(p)
 
 plantillas_dict = {
     normalizar(p.replace(".docx", "")): p for p in plantillas
@@ -88,59 +85,86 @@ for idx, fila in df.iterrows():
 
     descripcion_raw = limpiar_texto(fila.get("descripcion", ""))
     descripcion = normalizar(descripcion_raw)
+    descripcion_compacta = descripcion.replace(" ", "")
 
-    print(f"\nFila {idx} → descripción: {descripcion}")
+    print(f"\nFila {idx} → {descripcion_raw}")
 
     if not descripcion:
-        print(f"Fila {idx}: descripción vacía")
+        print("Sin descripción")
         sin_plantilla += 1
         continue
 
     nombre_plantilla = None
+    clave_busqueda = None
 
-    if any(p in descripcion for p in ["vinculacion", "vinculación"]):
-        for clave, archivo in plantillas_dict.items():
-            if "nueva acometida efectiva espera" in clave:
-                nombre_plantilla = archivo
-                break
+    if "geofono" in descripcion:
+        if "inefectiv" in descripcion or contiene(descripcion, "inefectiva"):
+            clave_busqueda = "revision con geofono inefectivo"
+        else:
+            clave_busqueda = "revision con geofono efectivo"
 
-        if not nombre_plantilla:
-            print("No se encontró la plantilla de vinculación")
-            sin_plantilla += 1
-            continue
+    elif "suspension" in descripcion or contiene(descripcion, "suspension"):
+        if "inefectiv" in descripcion or contiene(descripcion, "inefectiva"):
+            clave_busqueda = "suspension inefectiva"
+        else:
+            clave_busqueda = "suspension efectiva"
+
+    elif "reconexion" in descripcion or contiene(descripcion, "reconexion"):
+        if "inefectiv" in descripcion or contiene(descripcion, "inefectiva"):
+            clave_busqueda = "reconexion inefectiva"
+        else:
+            clave_busqueda = "reconexion efectiva"
+
+    elif "cambio de nombre" in descripcion or contiene(descripcion, "cambiodenombre"):
+        if "inefectiv" in descripcion:
+            clave_busqueda = "cambio de nombre inefectivo"
+        else:
+            clave_busqueda = "cambio de nombre efectivo"
+
+    elif "taponamiento" in descripcion:
+        if "inefectiv" in descripcion:
+            clave_busqueda = "taponamiento inefectivo"
+        else:
+            clave_busqueda = "taponamiento efectivo"
 
     elif "independizacion" in descripcion:
-        for clave, archivo in plantillas_dict.items():
-            if "nueva acometida efectiva espera" in clave:
-                nombre_plantilla = archivo
-                break
+        if "inefectiv" in descripcion:
+            clave_busqueda = "independizacion inefectiva"
+        else:
+            clave_busqueda = "nueva acometida efectiva espera"
 
-    elif "revisiones internas" in descripcion:
-        for clave, archivo in plantillas_dict.items():
-            if "informacion visita" in clave:
-                nombre_plantilla = archivo
-                break
-    
-    elif "revision interna" in descripcion:
-        for clave, archivo in plantillas_dict.items():
-            if "informacion visita" in clave:
-                nombre_plantilla = archivo
-                break
+    elif "nueva conexion" in descripcion or "acometida" in descripcion:
+        if "inefectiv" in descripcion:
+            clave_busqueda = "nueva acometida inefectiva"
+        else:
+            clave_busqueda = "nueva acometida efectiva espera"
+
+    elif "revision" in descripcion and "interna" in descripcion:
+        clave_busqueda = "informacion visita"
+
+    elif "vinculacion" in descripcion or "vinculación" in descripcion:
+        clave_busqueda = "nueva acometida efectiva espera"
+
+    if clave_busqueda:
+        print(f"Clave usada: {clave_busqueda}")
+        nombre_plantilla = buscar_plantilla(clave_busqueda, plantillas_dict)
 
     if not nombre_plantilla:
-        coincidencia = get_close_matches(descripcion, lista_claves, n=1, cutoff=0.4)
-
-        if not coincidencia:
-            print(f"Fila {idx}: no se encontró plantilla para '{descripcion_raw}'")
+        coincidencia = get_close_matches(descripcion, lista_claves, n=1, cutoff=0.75)
+        if coincidencia:
+            nombre_plantilla = plantillas_dict[coincidencia[0]]
+            print(f"Por similitud: {coincidencia[0]}")
+        else:
+            print("Sin plantilla")
             sin_plantilla += 1
             continue
 
-        nombre_plantilla = plantillas_dict[coincidencia[0]]
+    print(f"Plantilla: {nombre_plantilla}")
 
     ruta_plantilla = os.path.join(carpeta_plantillas, nombre_plantilla)
 
     if not os.path.exists(ruta_plantilla):
-        print(f"Fila {idx}: plantilla no existe {nombre_plantilla}")
+        print("No existe archivo")
         sin_plantilla += 1
         continue
 
@@ -159,22 +183,20 @@ for idx, fila in df.iterrows():
         doc = DocxTemplate(ruta_plantilla)
         doc.render(contexto)
 
-        nombre_limpio = limpiar_nombre_archivo(contexto.get("nombre", "sin_nombre"))
-        apellido_limpio = limpiar_nombre_archivo(contexto.get("apellido", "sin_apellido"))
+        nombre_oficio = limpiar_nombre_archivo(contexto.get("nombre_radicado", "sin_nombre"))
 
         nombre_archivo = os.path.join(
             base_path,
-            f"oficio_{nombre_limpio}_{apellido_limpio}_{idx}.docx"
+            f"oficio_{nombre_oficio}_{idx}.docx"
         )
 
         doc.save(nombre_archivo)
-
-        print(f"✓ Generado: {nombre_archivo}")
+        print("Generado")
         generados += 1
 
     except Exception as e:
-        print(f"Fila {idx}: error — {e}")
+        print(f"Error: {e}")
+        sin_plantilla += 1
 
-print("\nRESUMEN:")
-print(f"Oficios generados: {generados}")
+print(f"\nOficios generados: {generados}")
 print(f"Sin plantilla: {sin_plantilla}")
