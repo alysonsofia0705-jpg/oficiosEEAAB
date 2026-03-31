@@ -150,12 +150,10 @@ for idx, fila in df.iterrows():
 
     if clave_busqueda:
         print(f"Clave usada: {clave_busqueda}")
-
         nombre_plantilla = buscar_plantilla(clave_busqueda, plantillas_dict)
 
     if not nombre_plantilla:
         coincidencia = get_close_matches(descripcion, lista_claves, n=1, cutoff=0.7)
-
         if coincidencia:
             nombre_plantilla = plantillas_dict[coincidencia[0]]
             print(f"Por similitud: {coincidencia[0]}")
@@ -181,11 +179,28 @@ for idx, fila in df.iterrows():
 
         if isinstance(valor, float) and valor.is_integer():
             valor = int(valor)
+        if llave == "nombre_radicado":
+            valor = str(valor).upper().strip()
+        if llave == "control_tecnico" and valor:
+            try:
+                fecha = pd.to_datetime(valor, errors="coerce")
+                if pd.notna(fecha):
+                    valor = fecha.strftime("%d/%m/%Y")
+                else:
+                    valor = ""
+            except:
+                valor = ""
+
         if "fecha" in llave and valor:
             try:
-                valor = pd.to_datetime(valor).strftime("%d/%m/%Y")
+                fecha = pd.to_datetime(valor, errors="coerce")
+                if pd.notna(fecha):
+                    valor = fecha.strftime("%d/%m/%Y")
+                else:
+                    valor = ""
             except:
                 pass
+
         contexto[llave] = limpiar_xml(limpiar_texto(valor))
 
     try:
